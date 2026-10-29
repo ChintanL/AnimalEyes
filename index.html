@@ -24,7 +24,7 @@ button,label.btn{font:600 15px "Instrument Sans",sans-serif;background:var(--acc
 button.ghost,label.btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
 button:focus-visible,label.btn:focus-within{outline:3px solid var(--ink);outline-offset:2px}
 .err{color:#c0392b;min-height:1.4em;font-size:14px}
-.hud{position:absolute;left:12px;bottom:12px;background:rgba(0,0,0,.6);color:#fff;padding:6px 12px;border-radius:999px;font-size:13px}
+.hud{position:absolute;left:12px;top:12px;background:rgba(0,0,0,.6);color:#fff;padding:6px 12px;border-radius:999px;font-size:13px}
 .tools{position:absolute;right:10px;top:10px;display:flex;gap:8px}
 .tools button{padding:8px 14px;font-size:13px;background:rgba(0,0,0,.55);color:#fff}
 .eyes{display:flex;gap:10px;overflow-x:auto;padding:16px 2px 8px;scrollbar-width:thin}
@@ -37,6 +37,11 @@ button:focus-visible,label.btn:focus-within{outline:3px solid var(--ink);outline
 .facts{display:flex;flex-wrap:wrap;gap:8px 24px;margin-top:10px;color:var(--mut);font-size:14px}
 .facts b{color:var(--ink)}
 .note{color:var(--mut);font-size:13px;margin-top:14px}
+.bar{position:absolute;left:0;right:0;bottom:calc(10px + env(safe-area-inset-bottom,0px));display:flex;justify-content:center;gap:6px;padding:0 8px}
+.bar button{font-size:24px;line-height:1;width:46px;height:46px;padding:0;border-radius:50%;background:rgba(0,0,0,.5);color:#fff;border:2px solid transparent}
+.bar button[aria-pressed="true"]{border-color:var(--acc);background:rgba(0,0,0,.8);transform:scale(1.12)}
+.stage:fullscreen{border-radius:0;aspect-ratio:auto;width:100%;height:100%;border:0}
+.stage.fs{position:fixed;inset:0;z-index:50;border-radius:0;aspect-ratio:auto;border:0}
 </style>
 </head>
 <body>
@@ -53,7 +58,8 @@ button:focus-visible,label.btn:focus-within{outline:3px solid var(--ink);outline
       <label class="btn">Take a photo<input id="file2" type="file" accept="image/*" capture="environment" hidden></label>
       <label class="btn ghost">Or choose a photo<input id="file" type="file" accept="image/*" hidden></label>
     </div>
-    <div class="tools" id="tools" hidden><button id="flip" class="ghost">Switch camera</button></div>
+    <div class="tools" id="tools" hidden><button id="flip" class="ghost">Flip</button><button id="fs" class="ghost">Full screen</button></div>
+    <div class="bar" id="bar" role="group" aria-label="Switch animal" hidden></div>
     <div class="hud" id="hud" hidden></div>
   </div>
 
@@ -67,11 +73,14 @@ const ANIMALS=[
  {id:'human',name:'Human',pupil:'round',title:'Human',text:'Three colour receptors, sharp central vision and a forward-facing view. This is your baseline.',facts:['Colour: <b>trichromat</b>','Field of view: <b>~190°</b>','Sharpness: <b>20/20</b>']},
  {id:'dog',name:'Dog',pupil:'round',title:'Dog',text:'Dogs have two colour receptors, so reds and greens blur into yellowish browns while blues stay vivid. Their detail is softer than ours, but they notice motion very well.',facts:['Colour: <b>dichromat</b>','Field of view: <b>~240°</b>','Sharpness: <b>~20/75</b>']},
  {id:'cat',name:'Cat',pupil:'slit',title:'Cat',text:'Cats see dim scenes far better than we do, thanks to a reflective layer behind the retina. The price is softer detail and muted colour, mostly blues and greens.',facts:['Colour: <b>limited dichromat</b>','Field of view: <b>~200°</b>','Night vision: <b>~6× better</b>']},
+ {id:'deer',name:'Deer',pupil:'horiz',title:'Deer',text:'Deer see mostly blues and yellows, so reds and oranges look like dull greens and browns, which is why hunters can wear blaze orange. Their sideways pupils give a huge panoramic view and sharp motion detection, with fuzzier detail and strong low-light sight.',facts:['Colour: <b>dichromat</b>','Field of view: <b>~310°</b>','Sharpness: <b>~20/120</b>']},
  {id:'bee',name:'Bee',pupil:'hex',title:'Honeybee',text:'Bees can’t see red, but they see ultraviolet, which reveals hidden patterns on flowers. Their compound eyes give a coarse, mosaic image. UV is shown here as violet.',facts:['Colour: <b>UV, blue, green</b>','Field of view: <b>~280°</b>','Sharpness: <b>very low</b>']},
  {id:'eagle',name:'Eagle',pupil:'round',title:'Eagle',text:'Eagles have a dense cluster of receptors and a deep fovea, resolving detail about four times finer than a human. The view here is zoomed and enhanced, with richer colour.',facts:['Colour: <b>tetrachromat</b>','Field of view: <b>~340°</b>','Sharpness: <b>~20/5</b>']},
  {id:'fly',name:'Fly',pupil:'hex',title:'Housefly',text:'A fly’s compound eyes are made of thousands of tiny lenses, each seeing one dot of the scene. Detail is low, but they process motion several times faster than we do.',facts:['Colour: <b>UV + visible</b>','Field of view: <b>~360°</b>','Motion: <b>~250 images/sec</b>']},
  {id:'snake',name:'Pit viper',pupil:'slit',title:'Pit viper',text:'Pit vipers combine ordinary eyesight with a heat-sensing pit organ between eye and nostril. This view maps brightness to a heat palette as a stand-in for infrared.',facts:['Sense: <b>infrared + visible</b>','Field of view: <b>~200°</b>','Hunts: <b>in total darkness</b>']}
 ];
+const EMOJI={deer:'🦌',human:'🧑',dog:'🐶',cat:'🐱',bee:'🐝',eagle:'🦅',fly:'🪰',snake:'🐍'};
+ANIMALS.forEach(a=>a.emoji=EMOJI[a.id]);
 const out=document.getElementById('out'),octx=out.getContext('2d');
 const src=document.createElement('canvas');src.width=320;src.height=240;
 const sctx=src.getContext('2d',{willReadFrequently:true});
@@ -80,19 +89,20 @@ let cur=ANIMALS[0],stream=null,facing='environment',still=null,t0=performance.no
 
 function pupilSVG(p){
  const iris='<circle cx="32" cy="32" r="28" fill="#e0a100" stroke="currentColor" stroke-width="2"/>';
- const shapes={round:'<circle cx="32" cy="32" r="13" fill="#14172b"/>',slit:'<ellipse cx="32" cy="32" rx="4.5" ry="22" fill="#14172b"/>',hex:'<polygon points="32,12 49,22 49,42 32,52 15,42 15,22" fill="#14172b"/>'};
+ const shapes={round:'<circle cx="32" cy="32" r="13" fill="#14172b"/>',slit:'<ellipse cx="32" cy="32" rx="4.5" ry="22" fill="#14172b"/>',hex:'<polygon points="32,12 49,22 49,42 32,52 15,42 15,22" fill="#14172b"/>',horiz:'<ellipse cx="32" cy="32" rx="22" ry="5" fill="#14172b"/>'};
  return '<svg viewBox="0 0 64 64" aria-hidden="true">'+iris+shapes[p]+'<circle cx="38" cy="26" r="3" fill="#fff" opacity=".8"/></svg>';
 }
 const eyes=document.getElementById('eyes');
 ANIMALS.forEach(a=>{
- const b=document.createElement('button');b.className='eye';b.innerHTML=pupilSVG(a.pupil)+'<span>'+a.name+'</span>';
+ const b=document.createElement('button');b.className='eye';b.innerHTML=pupilSVG(a.pupil)+'<span>'+a.emoji+' '+a.name+'</span>';
  b.setAttribute('aria-pressed',a===cur);b.onclick=()=>pick(a);a.btn=b;eyes.appendChild(b);
+ const q=document.createElement('button');q.textContent=a.emoji;q.setAttribute('aria-label',a.name);q.setAttribute('aria-pressed',a===cur);q.onclick=()=>pick(a);a.qbtn=q;document.getElementById('bar').appendChild(q);
 });
 function pick(a){
- cur=a;ANIMALS.forEach(x=>x.btn.setAttribute('aria-pressed',x===a));
- out.style.filter={dog:'blur(1.6px)',cat:'blur(2.4px) brightness(1.25) contrast(1.1)',bee:'blur(1px)',eagle:'saturate(1.5) contrast(1.15)',snake:'blur(1.8px)'}[a.id]||'none';
+ cur=a;ANIMALS.forEach(x=>{x.btn.setAttribute('aria-pressed',x===a);x.qbtn.setAttribute('aria-pressed',x===a);});
+ out.style.filter={dog:'blur(1.6px)',cat:'blur(2.4px) brightness(1.25) contrast(1.1)',deer:'blur(2.8px) brightness(1.15)',bee:'blur(1px)',eagle:'saturate(1.5) contrast(1.15)',snake:'blur(1.8px)'}[a.id]||'none';
  document.getElementById('info').innerHTML='<h2>'+a.title+'</h2><p>'+a.text+'</p><div class="facts">'+a.facts.map(f=>'<span>'+f+'</span>').join('')+'</div>';
- const h=document.getElementById('hud');h.textContent='Seeing as: '+a.title;
+ const h=document.getElementById('hud');h.textContent=a.emoji+' '+a.title;
 }
 pick(cur);
 
@@ -121,6 +131,7 @@ function frame(now){
   const r=d[i],g=d[i+1],b=d[i+2];
   if(id==='dog'){d[i]=.625*r+.375*g;d[i+1]=.7*g+.3*r;d[i+2]=.3*g+.7*b;}
   else if(id==='cat'){const m=.5*r+.5*g;d[i]=.4*m+.1*b+.2*r;d[i+1]=.5*m+.3*g;d[i+2]=.6*b+.3*m;}
+  else if(id==='deer'){const y=(r+g)/2;d[i]=y*.95+b*.05;d[i+1]=y*.9+b*.1;d[i+2]=Math.min(255,b*1.15);}
   else if(id==='bee'){const uv=Math.max(0,b-.4*g);d[i]=uv*.55+g*.1;d[i+1]=g*.85;d[i+2]=Math.min(255,b*.8+uv*.5);}
   else if(id==='eagle'){const m=(r+g+b)/3;d[i]=m+(r-m)*1.3;d[i+1]=m+(g-m)*1.3;d[i+2]=m+(b-m)*1.3;}
   else if(id==='snake'){const l=(.3*r+.59*g+.11*b)/255,c=heat(l*l*1.2+.05*Math.sin(l*9));d[i]=c[0];d[i+1]=c[1];d[i+2]=c[2];}
@@ -142,7 +153,7 @@ function frame(now){
  }else{
   octx.imageSmoothingEnabled=true;octx.drawImage(src,0,0,W,H);
  }
- if(id==='cat'||id==='dog'){ // soft vignette for wide-set eyes
+ if(id==='cat'||id==='dog'||id==='deer'){ // soft vignette for wide-set eyes
   const g=octx.createRadialGradient(W/2,H/2,H*.35,W/2,H/2,H*.85);
   g.addColorStop(0,'rgba(0,0,0,0)');g.addColorStop(1,'rgba(0,0,0,.55)');octx.fillStyle=g;octx.fillRect(0,0,W,H);
  }
@@ -152,7 +163,7 @@ requestAnimationFrame(frame);
 function ready(){
  document.getElementById('start').hidden=true;
  document.getElementById('hud').hidden=false;
- document.getElementById('tools').hidden=!stream;
+ document.getElementById('tools').hidden=false;document.getElementById('flip').hidden=!stream;document.getElementById('bar').hidden=false;
 }
 async function startCam(){
  const err=document.getElementById('err');err.textContent='';
@@ -173,6 +184,24 @@ document.getElementById('file').onchange=e=>{
  const im=new Image();im.onload=()=>{if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}still=im;ready();};
  im.src=URL.createObjectURL(f);
 };
+const stage=document.querySelector('.stage'),fsBtn=document.getElementById('fs');
+function isFS(){return document.fullscreenElement||document.webkitFullscreenElement||stage.classList.contains('fs');}
+function syncFS(){fsBtn.textContent=isFS()?'Exit full screen':'Full screen';}
+fsBtn.onclick=()=>{
+ if(isFS()){
+  if(document.fullscreenElement)document.exitFullscreen();
+  else if(document.webkitFullscreenElement)document.webkitExitFullscreen();
+  stage.classList.remove('fs');
+ }else{
+  const rq=stage.requestFullscreen||stage.webkitRequestFullscreen;
+  if(rq){const p=rq.call(stage);if(p&&p.catch)p.catch(()=>{stage.classList.add('fs');syncFS();});}
+  else stage.classList.add('fs');
+ }
+ syncFS();
+};
+document.addEventListener('fullscreenchange',syncFS);
+document.addEventListener('webkitfullscreenchange',syncFS);
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&stage.classList.contains('fs')){stage.classList.remove('fs');syncFS();}});
 </script>
 </body>
 </html>
